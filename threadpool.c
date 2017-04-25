@@ -1,4 +1,5 @@
 #include "threadpool.h"
+#include "atomic_ops_if.h"
 
 /**
  * @brief Release the memory allocated in _task\_t_
@@ -56,18 +57,30 @@ int tqueue_init(tqueue_t *the_queue)
 task_t *tqueue_pop(tqueue_t * const the_queue)
 {
     task_t *ret;
-    pthread_mutex_lock(&(the_queue->mutex));
     ret = the_queue->head;
     if (ret) {
-        the_queue->head = ret->next;
-        ret->next = NULL;
-        if (!(the_queue->head)) {
-            the_queue->tail = NULL;
+        if(CAS_PTR(&(the_queue->tail), ret, NULL) == ret) {
+            if(CAS_PTR(&(the_queue->head), ret, NULL) == ret) {
+                FAD_U32(&(the_queue->size));
+                FAI_U32(&(the_queue->num_of_consumed));
+                return ret;
+            } else {
+                return NULL;
+            }
+        } else {
+            if(ret->next) {
+                if(CAS_PTR(&(the_queue->head), ret, ret->next) == ret) {
+                    FAD_U32(&(the_queue->size));
+                    FAI_U32(&(the_queue->num_of_consumed));
+                    return ret;
+                } else {
+                    return NULL;
+                }
+            } else {
+                return NULL;
+            }
         }
-        the_queue->size--;
-        the_queue->num_of_consumed++;
     }
-    pthread_mutex_unlock(&(the_queue->mutex));
     return ret;
 }
 
@@ -92,14 +105,29 @@ uint32_t tqueue_size(tqueue_t * const the_queue)
  */
 int tqueue_push(tqueue_t * const the_queue, task_t *task)
 {
-    pthread_mutex_lock(&(the_queue->mutex));
+    task_t *tail = NULL, *head = NULL, *tail_next = NULL;
     task->next = NULL;
-    if (the_queue->tail)
-        the_queue->tail->next = task;
-    the_queue->tail = task;
-    if (the_queue->size++ == 0)
-        the_queue->head = task;
-    pthread_mutex_unlock(&(the_queue->mutex));
+
+    do {
+        tail = the_queue->tail;
+        if (CAS_PTR(&(the_queue->tail), tail, task) == tail)
+            break;
+    } while(1);
+
+    if (tail) {
+        do {
+            tail_next = tail->next;
+            if (CAS_PTR(&(tail->next), tail_next, task) == tail_next)
+                break;
+        } while(1);
+    } else {
+        do {
+            head = the_queue->head;
+            if (CAS_PTR(&(the_queue->head), head, task) == head)
+                break;
+        } while(1);
+    }
+    FAI_U32(&(the_queue->size));
     return 0;
 }
 
