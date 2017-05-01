@@ -1,6 +1,5 @@
 #include "threadpool.h"
-#include "atomic_ops_if.h"
-
+#include <stdatomic.h>
 /**
  * @brief Release the memory allocated in _task\_t_
  *
@@ -76,17 +75,17 @@ task_t *tqueue_pop(tqueue_t * const the_queue)
                 if(next == NULL) {
                     return NULL;
                 }
-                CAS_PTR(&(the_queue->tail), tail, next);
+                atomic_compare_exchange_weak(&(the_queue->tail), &tail, next);
             } else {
                 ret = next;
-                if(CAS_PTR(&(the_queue->head), head, next) == head) {
+                if(atomic_compare_exchange_weak(&(the_queue->head), &head, next)) {
                     break;
                 }
             }
         }
     }
-    FAD_U32(&(the_queue->size));
-    FAI_U32(&(the_queue->num_of_consumed));
+    atomic_fetch_sub(&(the_queue->size), 1);
+    atomic_fetch_add(&(the_queue->num_of_consumed), 1);
     return ret;
 }
 
@@ -119,19 +118,19 @@ int tqueue_push(tqueue_t * const the_queue, task_t *task)
         tail_next = tail->next;
         if(tail == the_queue->tail) {
             if(tail_next == NULL) {
-                if(CAS_PTR(&(tail->next), tail_next, task) == tail_next) {
-                    if(CAS_PTR(&(the_queue->tail), tail, task) == tail) {
+                if(atomic_compare_exchange_weak(&(tail->next), &tail_next, task)) {
+                    if(atomic_compare_exchange_weak(&(the_queue->tail), &tail, task)) {
 
                     }
                     break;
                 }
             } else {
-                if(CAS_PTR(&(the_queue->tail), tail, tail_next) == tail) {
+                if(atomic_compare_exchange_weak(&(the_queue->tail), &tail, tail_next)) {
                 }
             }
         }
     }
-    FAI_U32(&(the_queue->size));
+    atomic_fetch_add(&(the_queue->size), 1);
     return 0;
 }
 

@@ -88,6 +88,7 @@ static void *task_run(void *data __attribute__ ((__unused__)))
         if (_task) {
             if (!_task->func) {
                 tqueue_push(pool->queue, task_new(NULL, NULL));
+                free(_task);
                 break;
             } else {
                 _task->func(_task->arg);
