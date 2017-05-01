@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -std=gnu11 -Wall -g -pthread
+CFLAGS = -std=gnu11 -Wall -g -pthread -O0
 OBJS = list.o threadpool.o merge_sort.o main.o
 
 .PHONY: all clean test

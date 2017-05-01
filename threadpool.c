@@ -10,6 +10,11 @@
  *
  * @param the_task Pointer to the target _task\_t_
  */
+void dummy_function(void *arg)
+{
+    return;
+}
+
 int task_free(task_t *the_task)
 {
     free(the_task->arg);
@@ -25,6 +30,7 @@ task_t *task_new(void (*func)(void *), void *arg)
     task_t *new_task = (task_t *)malloc(sizeof(task_t));
     new_task->func = func;
     new_task->arg = arg;
+    new_task->next = NULL;
     return new_task;
 }
 
@@ -44,7 +50,11 @@ int tqueue_init(tqueue_t *the_queue)
     the_queue->tail = NULL;
     pthread_mutex_init(&(the_queue->mutex), NULL);
     pthread_cond_init(&(the_queue->cond), NULL);
-    the_queue->size = 0;
+    task_t *dummy_node = task_new(dummy_function, NULL);
+    dummy_node->next = NULL;
+    the_queue->head = dummy_node;
+    the_queue->tail = dummy_node;
+    the_queue->size = 1;
     the_queue->num_of_consumed = 0;
     return 0;
 }
@@ -56,31 +66,27 @@ int tqueue_init(tqueue_t *the_queue)
  */
 task_t *tqueue_pop(tqueue_t * const the_queue)
 {
-    task_t *ret;
-    ret = the_queue->head;
-    if (ret) {
-        if(CAS_PTR(&(the_queue->tail), ret, NULL) == ret) {
-            if(CAS_PTR(&(the_queue->head), ret, NULL) == ret) {
-                FAD_U32(&(the_queue->size));
-                FAI_U32(&(the_queue->num_of_consumed));
-                return ret;
-            } else {
-                return NULL;
-            }
-        } else {
-            if(ret->next) {
-                if(CAS_PTR(&(the_queue->head), ret, ret->next) == ret) {
-                    FAD_U32(&(the_queue->size));
-                    FAI_U32(&(the_queue->num_of_consumed));
-                    return ret;
-                } else {
+    task_t *head = NULL, *tail = NULL, *next = NULL, *ret = NULL;
+    while(1) {
+        head = the_queue->head;
+        tail = the_queue->tail;
+        next = head->next;
+        if(head == the_queue->head) {
+            if(head == tail) {
+                if(next == NULL) {
                     return NULL;
                 }
+                CAS_PTR(&(the_queue->tail), tail, next);
             } else {
-                return NULL;
+                ret = next;
+                if(CAS_PTR(&(the_queue->head), head, next) == head) {
+                    break;
+                }
             }
         }
     }
+    FAD_U32(&(the_queue->size));
+    FAI_U32(&(the_queue->num_of_consumed));
     return ret;
 }
 
@@ -107,25 +113,23 @@ int tqueue_push(tqueue_t * const the_queue, task_t *task)
 {
     task_t *tail = NULL, *head = NULL, *tail_next = NULL;
     task->next = NULL;
-
-    do {
+    while(1) {
+        head = the_queue->head;
         tail = the_queue->tail;
-        if (CAS_PTR(&(the_queue->tail), tail, task) == tail)
-            break;
-    } while(1);
+        tail_next = tail->next;
+        if(tail == the_queue->tail) {
+            if(tail_next == NULL) {
+                if(CAS_PTR(&(tail->next), tail_next, task) == tail_next) {
+                    if(CAS_PTR(&(the_queue->tail), tail, task) == tail) {
 
-    if (tail) {
-        do {
-            tail_next = tail->next;
-            if (CAS_PTR(&(tail->next), tail_next, task) == tail_next)
-                break;
-        } while(1);
-    } else {
-        do {
-            head = the_queue->head;
-            if (CAS_PTR(&(the_queue->head), head, task) == head)
-                break;
-        } while(1);
+                    }
+                    break;
+                }
+            } else {
+                if(CAS_PTR(&(the_queue->tail), tail, tail_next) == tail) {
+                }
+            }
+        }
     }
     FAI_U32(&(the_queue->size));
     return 0;

@@ -87,7 +87,7 @@ static void *task_run(void *data __attribute__ ((__unused__)))
         task_t *_task = tqueue_pop(pool->queue);
         if (_task) {
             if (!_task->func) {
-                tqueue_push(pool->queue, _task);
+                tqueue_push(pool->queue, task_new(NULL, NULL));
                 break;
             } else {
                 _task->func(_task->arg);
@@ -141,7 +141,6 @@ int main(int argc, char const *argv[])
 
     /* launch the first task */
     tqueue_push(pool->queue, task_new(cut_local_list, the_list));
-
     /* release thread pool */
     consumed_tasks = tpool_free(pool);
 
