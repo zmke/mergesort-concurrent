@@ -110,10 +110,9 @@ uint32_t tqueue_size(tqueue_t * const the_queue)
  */
 int tqueue_push(tqueue_t * const the_queue, task_t *task)
 {
-    task_t *tail = NULL, *head = NULL, *tail_next = NULL;
+    task_t *tail = NULL, *tail_next = NULL;
     task->next = NULL;
     while(1) {
-        head = the_queue->head;
         tail = the_queue->tail;
         tail_next = tail->next;
         if(tail == the_queue->tail) {
@@ -142,12 +141,7 @@ int tqueue_push(tqueue_t * const the_queue, task_t *task)
 uint32_t tqueue_free(tqueue_t *the_queue)
 {
     uint32_t num_of_consumed = the_queue->num_of_consumed;
-    task_t *cur = the_queue->head;
-    while (cur) {
-        the_queue->head = the_queue->head->next;
-        free(cur);
-        cur = the_queue->head;
-    }
+    free(the_queue->tail);
     pthread_mutex_destroy(&(the_queue->mutex));
     return num_of_consumed;
 }
