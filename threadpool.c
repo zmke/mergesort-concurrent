@@ -119,7 +119,6 @@ int tqueue_push(tqueue_t * const the_queue, task_t *task)
             if(tail_next == NULL) {
                 if(atomic_compare_exchange_weak(&(tail->next), &tail_next, task)) {
                     if(atomic_compare_exchange_weak(&(the_queue->tail), &tail, task)) {
-
                     }
                     break;
                 }
@@ -130,6 +129,7 @@ int tqueue_push(tqueue_t * const the_queue, task_t *task)
         }
     }
     atomic_fetch_add(&(the_queue->size), 1);
+    pthread_cond_signal(&(the_queue->cond));
     return 0;
 }
 
