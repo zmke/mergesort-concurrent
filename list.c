@@ -31,7 +31,8 @@ llist_t *list_new()
 {
     /* allocate list */
     llist_t *list = malloc(sizeof(llist_t));
-    list->head = NULL;
+    list->tail = node_new((val_t)NULL, NULL);
+    list->head = node_new((val_t)NULL, list->tail);
     list->size = 0;
     return list;
 }
@@ -44,9 +45,8 @@ llist_t *list_new()
  */
 int list_add(llist_t * const list, const val_t val)
 {
-    node_t *e = node_new(val, NULL);
-    e->next = list->head;
-    list->head = e;
+    node_t *e = node_new(val, list->head->next);
+    list->head->next = e;
     list->size++;
     return list->size;
 }
@@ -64,10 +64,10 @@ node_t *list_get(llist_t * const list, const uint32_t index)
     uint32_t idx = index;
     if (!(idx < list->size))
         return NULL;
-    node_t *head = list->head;
+    node_t *e = list->head->next;
     while (idx--)
-        head = head->next;
-    return head;
+        e = e->next;
+    return e;
 }
 
 /**
@@ -76,8 +76,8 @@ node_t *list_get(llist_t * const list, const uint32_t index)
  */
 void list_print(const llist_t * const list)
 {
-    const node_t *cur = list->head;
-    while (cur) {
+    const node_t *cur = list->head->next;
+    while (cur != list->tail) {
         xprint((char*)cur->data);
         cur = cur->next;
     }
@@ -89,10 +89,11 @@ void list_print(const llist_t * const list)
  */
 void list_free_nodes(llist_t *list)
 {
+    node_t *next;
     node_t *cur = list->head;
     while (cur) {
-        cur = cur->next;
+        next = cur->next;
         free(cur);
+        cur = next;
     }
-    list->head = NULL;
 }

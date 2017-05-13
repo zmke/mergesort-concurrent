@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <stdatomic.h>
 
 #include "threadpool.h"
 #include "list.h"
@@ -21,6 +22,85 @@ static llist_t *the_list = NULL;
 static int thread_count = 0, data_count = 0, max_cut = 0;
 static tpool_t *pool = NULL;
 
+static int local_size = 0, last_local_size = 0;
+
+typedef struct {
+    llist_t *source;
+    llist_t *dest;
+    int task_cnt;
+} merge_list_arg_t;
+
+void merge_thread_lists(void *data);
+
+node_t *list_pop(llist_t *list)
+{
+    node_t *head = list->head;
+    node_t *tail = list->tail;
+    node_t *node, *node_next;
+    do {
+        node = head->next;
+        if (node == tail)
+            return NULL;
+        node_next = node->next;
+        if (atomic_compare_exchange_weak(&(head->next), &node, node_next))
+            break;
+    } while (1);
+    return node;
+}
+
+node_t *list_search(node_t *cur, node_t *tail, val_t data, node_t** left_node)
+{
+    node_t *right_node;
+    node_t *t = cur;
+    node_t *t_next = cur->next;
+    do {
+        *(left_node) = t;
+        t = t_next;
+        if (t == tail)
+            break;
+        t_next = t->next;
+    } while (strcmp((char *)t->data, (char *)data) <= 0);
+    right_node = t;
+    return right_node;
+}
+
+void list_insert(llist_t *list, node_t **cur, node_t * node)
+{
+    node_t *left_node, *right_node;
+    do {
+        right_node = list_search(*cur, list->tail, node->data, &left_node);
+        node->next = right_node;
+        if (atomic_compare_exchange_weak(&(left_node->next), &right_node, node)) {
+            *cur = node;
+            return;
+        }
+    } while (1);
+}
+
+void concurrent_merge(void *data)
+{
+    merge_list_arg_t *arg = (merge_list_arg_t *)data;
+    llist_t *source = arg->source;
+    llist_t *dest = arg->dest;
+    node_t *cur = NULL, *node = NULL;
+    int old_cnt = 0;
+    cur = dest->head;
+    while (1) {
+        node = list_pop(source);
+        if (!node) {
+            old_cnt = atomic_fetch_sub(&(arg->task_cnt), 1);
+            if (old_cnt == 1) {
+                dest->size += source->size;
+                source->size = 0;
+                list_free_nodes(source);
+                tqueue_push(pool->queue, task_new(merge_thread_lists, dest));
+            }
+            break;
+        }
+        list_insert(dest, &cur, node);
+    }
+}
+
 void merge_thread_lists(void *data)
 {
     llist_t *_list = (llist_t *) data;
@@ -38,7 +118,20 @@ void merge_thread_lists(void *data)
              */
             tmp_list = NULL;
             pthread_mutex_unlock(&(data_context.mutex));
-            tqueue_push(pool->queue, task_new(merge_thread_lists, sort_n_merge(_list, _t)));
+
+            merge_list_arg_t *arg = malloc(sizeof(merge_list_arg_t));
+            if (_t->size < _list->size) {
+                arg->source = _t;
+                arg->dest = _list;
+            } else {
+                arg->source = _list;
+                arg->dest = _t;
+            }
+
+            arg->task_cnt = arg->source->size / local_size * 2;
+            int task_cnt = arg->task_cnt;
+            for (int i = 0; i < task_cnt; i++)
+                tqueue_push(pool->queue, task_new(concurrent_merge, arg));
         }
     } else {
         /*
@@ -58,26 +151,31 @@ void sort_local_list(void *data)
 void cut_local_list(void *data)
 {
     llist_t *list = (llist_t *) data, *local_list;
-    node_t *head, *tail;
-    int local_size = data_count / max_cut;
+    node_t *head_next, *tail_prev;
+    local_size = data_count / max_cut;
+    last_local_size = list->size - local_size * (max_cut - 1);
 
-    head = list->head;
+    head_next = list->head->next;
     for (int i = 0; i < max_cut - 1; ++i) {
         /* Create local list container */
         local_list = list_new();
-        local_list->head = head;
+        local_list->head->next = head_next;
         local_list->size = local_size;
         /* Cut the local list */
-        tail = list_get(local_list, local_size - 1);
-        head = tail->next;
-        tail->next = NULL;
+        tail_prev = list_get(local_list, local_size - 1);
+        head_next = tail_prev->next;
+        tail_prev->next = local_list->tail;
         /* Create new task */
         tqueue_push(pool->queue, task_new(sort_local_list, local_list));
     }
     /* The last takes the rest. */
     local_list = list_new();
-    local_list->head = head;
-    local_list->size = list->size - local_size * (max_cut - 1);
+    local_list->head->next = head_next;
+    local_list->size = last_local_size;
+    tail_prev = list_get(local_list, last_local_size - 1);
+    tail_prev->next = local_list->tail;
+    list->head->next = list->tail;
+    list_free_nodes(list);
     tqueue_push(pool->queue, task_new(sort_local_list, local_list));
 }
 

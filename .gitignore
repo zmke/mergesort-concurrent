@@ -6,6 +6,10 @@
 *.list
 *.swp
 *.bak
+*.png
+*.old
+*.data
+*.out
 sort
 test_data/input.txt
 tools/util-average

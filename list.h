@@ -20,6 +20,7 @@ typedef struct node {
  */
 typedef struct {
     node_t *head;   /**< The head of the linked list */
+    node_t *tail;   /**< The tail of the linked list */
     uint32_t size;  /**< The size of the linked list */
 } llist_t;
 
