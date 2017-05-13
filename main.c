@@ -182,6 +182,10 @@ void cut_local_list(void *data)
 static void *task_run(void *data __attribute__ ((__unused__)))
 {
     while (1) {
+        pthread_mutex_lock(&(pool->queue->mutex));
+        while(pool->queue->size == 0)
+            pthread_cond_wait(&(pool->queue->cond), &(pool->queue->mutex));
+        pthread_mutex_unlock(&(pool->queue->mutex));
         task_t *_task = tqueue_pop(pool->queue);
         if (_task) {
             if (!_task->func) {
@@ -254,6 +258,9 @@ int main(int argc, char const *argv[])
 
     /* Output sorted result */
     list_print(the_list);
-
+    FILE *output;
+    output = fopen("output.txt", "a+");
+    fprintf(output, "%lf\n", duration);
+    fclose(output);
     return 0;
 }
