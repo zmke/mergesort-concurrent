@@ -29,5 +29,7 @@ int list_add(llist_t * const the_list, const val_t val);
 void list_print(const llist_t * const the_list);
 node_t *list_get(llist_t * const the_list, const uint32_t index);
 void list_free_nodes(llist_t *the_list);
+void list_add_dummy_head(llist_t *list);
+void list_remove_dummy_head(llist_t *list);
 
 #endif

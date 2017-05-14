@@ -35,11 +35,10 @@ void merge_thread_lists(void *data);
 node_t *list_pop(llist_t *list)
 {
     node_t *head = list->head;
-    node_t *tail = list->tail;
     node_t *node, *node_next;
     do {
         node = head->next;
-        if (node == tail)
+        if (node == NULL)
             return NULL;
         node_next = node->next;
         if (atomic_compare_exchange_weak(&(head->next), &node, node_next))
@@ -48,7 +47,7 @@ node_t *list_pop(llist_t *list)
     return node;
 }
 
-node_t *list_search(node_t *cur, node_t *tail, val_t data, node_t** left_node)
+node_t *list_search(node_t *cur, val_t data, node_t** left_node)
 {
     node_t *right_node;
     node_t *t = cur;
@@ -56,7 +55,7 @@ node_t *list_search(node_t *cur, node_t *tail, val_t data, node_t** left_node)
     do {
         *(left_node) = t;
         t = t_next;
-        if (t == tail)
+        if (t == NULL)
             break;
         t_next = t->next;
     } while (strcmp((char *)t->data, (char *)data) <= 0);
@@ -68,12 +67,13 @@ void list_insert(llist_t *list, node_t **cur, node_t * node)
 {
     node_t *left_node, *right_node;
     do {
-        right_node = list_search(*cur, list->tail, node->data, &left_node);
+        right_node = list_search(*cur, node->data, &left_node);
         node->next = right_node;
         if (atomic_compare_exchange_weak(&(left_node->next), &right_node, node)) {
             *cur = node;
             return;
-        }
+        } else
+            *cur = left_node;
     } while (1);
 }
 
@@ -93,6 +93,7 @@ void concurrent_merge(void *data)
                 dest->size += source->size;
                 source->size = 0;
                 list_free_nodes(source);
+                list_remove_dummy_head(dest);
                 tqueue_push(pool->queue, task_new(merge_thread_lists, dest));
             }
             break;
@@ -119,6 +120,8 @@ void merge_thread_lists(void *data)
             tmp_list = NULL;
             pthread_mutex_unlock(&(data_context.mutex));
 
+            list_add_dummy_head(_t);
+            list_add_dummy_head(_list);
             merge_list_arg_t *arg = malloc(sizeof(merge_list_arg_t));
             if (_t->size < _list->size) {
                 arg->source = _t;
@@ -127,7 +130,6 @@ void merge_thread_lists(void *data)
                 arg->source = _list;
                 arg->dest = _t;
             }
-
             arg->task_cnt = arg->source->size / local_size * 2;
             int task_cnt = arg->task_cnt;
             for (int i = 0; i < task_cnt; i++)
@@ -151,31 +153,27 @@ void sort_local_list(void *data)
 void cut_local_list(void *data)
 {
     llist_t *list = (llist_t *) data, *local_list;
-    node_t *head_next, *tail_prev;
+    node_t *head, *tail;
     local_size = data_count / max_cut;
     last_local_size = list->size - local_size * (max_cut - 1);
 
-    head_next = list->head->next;
+    head = list->head;
     for (int i = 0; i < max_cut - 1; ++i) {
         /* Create local list container */
         local_list = list_new();
-        local_list->head->next = head_next;
+        local_list->head = head;
         local_list->size = local_size;
         /* Cut the local list */
-        tail_prev = list_get(local_list, local_size - 1);
-        head_next = tail_prev->next;
-        tail_prev->next = local_list->tail;
+        tail = list_get(local_list, local_size - 1);
+        head = tail->next;
+        tail->next = NULL;
         /* Create new task */
         tqueue_push(pool->queue, task_new(sort_local_list, local_list));
     }
     /* The last takes the rest. */
     local_list = list_new();
-    local_list->head->next = head_next;
+    local_list->head = head;
     local_list->size = last_local_size;
-    tail_prev = list_get(local_list, last_local_size - 1);
-    tail_prev->next = local_list->tail;
-    list->head->next = list->tail;
-    list_free_nodes(list);
     tqueue_push(pool->queue, task_new(sort_local_list, local_list));
 }
 
@@ -244,6 +242,7 @@ int main(int argc, char const *argv[])
 
     /* launch the first task */
     tqueue_push(pool->queue, task_new(cut_local_list, the_list));
+
     /* release thread pool */
     consumed_tasks = tpool_free(pool);
 
